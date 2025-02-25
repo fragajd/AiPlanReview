@@ -22,8 +22,8 @@ A powerful PDF analysis tool that combines OCR (Optical Character Recognition), 
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/ocrfraga.git
-   cd ocrfraga
+   git clone https://github.com/yourusername/fraga.git
+   cd fraga
    ```
 
 2. Create and activate a virtual environment:
