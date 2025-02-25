@@ -1,0 +1,8 @@
+streamlit
+pytesseract
+opencv-python
+Pillow
+PyMuPDF
+transformers
+torch
+spacy 
