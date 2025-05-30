@@ -374,7 +374,7 @@ def _cached_get_ai_response(
             genai.configure(api_key=google_api_key)
             
             # Use a suitable Gemini model 
-            gemini_model_name = 'gemini-1.5-flash-latest'
+            gemini_model_name = 'gemini-2.5-flash-preview-05-20'
             model = genai.GenerativeModel(gemini_model_name)
             
             logger.info(f"Sending request to Google Gemini API model {gemini_model_name} for Q&A.")

@@ -368,7 +368,7 @@ Text to enhance:
             try:
                 import google.generativeai as genai
                 genai.configure(api_key=google_api_key)
-                gemini_model_name = 'gemini-1.5-flash-latest' # Or choose another appropriate model
+                gemini_model_name = 'gemini-2.5-flash-preview-05-20' # Or choose another appropriate model
                 model = genai.GenerativeModel(gemini_model_name)
                 
                 logger.info(f"Sending text (length: {len(text_to_enhance)}) to Google Gemini model {gemini_model_name} for enhancement...")
@@ -892,24 +892,24 @@ def _cached_generate_document_summary(text_to_summarize: str, document_name: str
     model_preference = st.session_state.get('model_preference', 'local')
     google_api_key = st.session_state.get('google_api_key', None)
     
-    # Detailed, high-level overview-focused prompt
-    prompt = f"""You are an expert in summarizing architectural and engineering documents. 
-    
-CREATE A HIGH-LEVEL OVERVIEW SUMMARY of the following document: "{document_name}"
+    # Detailed, section-based information extraction prompt
+    prompt = f"""You are an expert technical analyst tasked with creating a DETAILED INFORMATION EXTRACTION from an architectural or engineering document named "{document_name}".
 
-Focus on providing information that would help answer questions like:
-1. What type of document is this? (Engineering drawing, permit application, architectural plan, etc.)
-2. What is the main purpose/subject of this document?
-3. What key systems, structures, or components does it describe?
-4. What are the most important specifications or requirements mentioned?
-5. Are there any notable compliance or building code references?
+Your goal is to process the document section by section and extract the most critical information.
 
-Your summary should be comprehensive (approximately 300-500 words) and focus on capturing the ESSENTIAL CONTEXT and MAIN TOPICS that would help someone understand what this document is about without getting lost in technical details.
+Instructions:
+1.  First, try to identify the main sections of the document (e.g., Introduction, Specifications, Load Calculations, Material Requirements, Compliance Statements, Conclusion, Appendices, etc.).
+2.  For EACH identified section, provide a concise summary of that section's purpose AND extract the most important technical details, data, specifications, measurements, code references, and key findings presented within that section.
+3.  Structure your output clearly, perhaps using headings for each section you identify.
+4.  Be comprehensive. The goal is NOT a brief overview, but a detailed extraction of core information that would be useful for answering specific technical questions about the document later.
+5.  If the document is short or does not have clearly defined sections, then provide a detailed extraction of all key information found.
+6.  Preserve all numerical values, dimensions, units, and technical terminology accurately.
+7.  Focus on factual information extraction. Avoid interpretation or adding information not present in the text.
 
 Document text:
 {text_to_summarize}
 
-SUMMARY:"""
+DETAILED INFORMATION EXTRACTION:"""
     
     try:
         if model_preference == 'local':
@@ -921,21 +921,23 @@ SUMMARY:"""
             logger.info(f"Generating document summary for '{document_name}' with Ollama...")
             
             # Chunk if necessary (for very large documents)
-            if len(text_to_summarize) > 12000:
+            if len(text_to_summarize) > 12000: # Adjusted threshold for potentially longer prompt/output
                 # Only use the beginning and end portions for summary if very large
                 beginning = text_to_summarize[:6000]
                 end = text_to_summarize[-6000:]
-                shortened_text = beginning + "\n\n[...middle content omitted...]\n\n" + end
-                text_to_summarize = shortened_text
+                # Ensure the prompt is applied to the shortened text
+                current_prompt = prompt.replace(text_to_summarize, beginning + "\n\n[...middle content omitted...]\n\n" + end)
+            else:
+                current_prompt = prompt
                 
             response = ollama_client.chat(
                 model="gemma3:4b",
-                messages=[{'role': 'user', 'content': prompt}],
+                messages=[{'role': 'user', 'content': current_prompt}],
                 stream=False
             )
             
             summary = response['message']['content'].strip()
-            logger.info(f"Generated document summary with Ollama for '{document_name}'")
+            logger.info(f"Generated detailed information extraction with Ollama for '{document_name}'")
             return summary
             
         elif model_preference == 'api':
@@ -954,16 +956,18 @@ SUMMARY:"""
                 logger.info(f"Generating document summary for '{document_name}' with Gemini API...")
                 
                 # Chunk if necessary (for very large documents)
-                if len(text_to_summarize) > 12000:
+                if len(text_to_summarize) > 12000: # Adjusted threshold
                     # Only use the beginning and end portions for summary if very large
                     beginning = text_to_summarize[:6000]
                     end = text_to_summarize[-6000:]
-                    shortened_text = beginning + "\n\n[...middle content omitted...]\n\n" + end
-                    text_to_summarize = shortened_text
+                    # Ensure the prompt is applied to the shortened text
+                    current_prompt = prompt.replace(text_to_summarize, beginning + "\n\n[...middle content omitted...]\n\n" + end)
+                else:
+                    current_prompt = prompt
                 
-                response = model.generate_content(prompt)
+                response = model.generate_content(current_prompt)
                 summary = response.text.strip()
-                logger.info(f"Generated document summary with Gemini API for '{document_name}'")
+                logger.info(f"Generated detailed information extraction with Gemini API for '{document_name}'")
                 return summary
                 
             except ImportError:

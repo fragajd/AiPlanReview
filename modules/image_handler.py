@@ -286,76 +286,104 @@ def check_images_processed(project_id: int, file_name: str) -> bool:
 # Remove caching for this version as direct extraction is fast
 # @st.cache_data(ttl=3600, show_spinner=False)
 def extract_images_from_pdf(pdf_file: io.BytesIO, min_area_ratio=0.02, dpi=150) -> List[Tuple[Image.Image, bytes, Dict[str, Any], int]]:
-    """Extracts images directly embedded in the PDF using Fitz.
+    """Extracts images directly embedded in the PDF using Fitz and also creates full-page renderings.
        Args:
            pdf_file: BytesIO object of the PDF file.
            min_area_ratio: Not used in this method.
-           dpi: Not used in this method.
+           dpi: Dots per inch for rendering full-page snapshots.
        
        Returns:
            List of tuples containing (PIL Image, bytes data, position info, page number)
+           for both embedded images and full-page renderings.
     """
     extracted_data = []
     try:
         pdf_file.seek(0)
         pdf_content = pdf_file.read()
         pdf_document = fitz.open(stream=pdf_content, filetype="pdf")
-        logger.info(f"Processing PDF with {pdf_document.page_count} pages using direct image extraction.")
+        logger.info(f"Processing PDF with {pdf_document.page_count} pages for image extraction (embedded + full page renders at {dpi} DPI).")
 
         for page_num in range(pdf_document.page_count):
             page = pdf_document[page_num]
+            
+            # 1. Existing logic: Extract embedded images
             image_list = page.get_images(full=True) # Get full image info
             
-            if not image_list:
-                continue # Skip page if no images
-
-            logger.info(f"Found {len(image_list)} potential image references on page {page_num + 1}.")
-
-            for img_index, img_info in enumerate(image_list):
-                xref = img_info[0]
-                if xref == 0:
-                    logger.warning(f"Skipping invalid xref 0 on page {page_num + 1}, image index {img_index}")
-                    continue
-                
-                try:
-                    base_image = pdf_document.extract_image(xref)
-                    if not base_image:
-                        logger.warning(f"Could not extract image for xref {xref} on page {page_num + 1}.")
+            if image_list: # Check if there are any embedded images on the page
+                logger.info(f"Found {len(image_list)} potential embedded image references on page {page_num + 1}.")
+                for img_index, img_info in enumerate(image_list):
+                    xref = img_info[0]
+                    if xref == 0:
+                        logger.warning(f"Skipping invalid xref 0 for embedded image on page {page_num + 1}, image index {img_index}")
                         continue
-                        
-                    image_bytes = base_image["image"] # Raw image bytes
-                    if not image_bytes:
-                        logger.warning(f"Extracted image for xref {xref} has no data (page {page_num + 1}).")
-                        continue
-                        
-                    # Convert to PIL Image for display and getting dimensions
+                    
                     try:
-                        pil_image = Image.open(io.BytesIO(image_bytes))
-                    except Exception as pil_err:
-                        logger.warning(f"Could not open extracted image bytes with PIL for xref {xref} on page {page_num + 1}: {pil_err}")
-                        continue # Skip if PIL can't open it
-                    
-                    # Create placeholder position data
-                    position_data = {
-                        "x": 0, # Placeholder
-                        "y": 0, # Placeholder
-                        "width": pil_image.width,
-                        "height": pil_image.height,
-                        "source": "embedded",
-                        "xref": xref
-                    }
-                    
-                    # Append the required tuple format
-                    extracted_data.append((pil_image, image_bytes, position_data, page_num))
-                    logger.info(f"Successfully extracted image xref {xref} from page {page_num + 1} ({pil_image.width}x{pil_image.height}).")
-                    
-                except Exception as extract_err:
-                    # Log errors during extraction of a specific image but continue
-                    logger.error(f"Error extracting/processing image xref {xref} on page {page_num + 1}: {extract_err}", exc_info=False) # Keep log less verbose
+                        base_image = pdf_document.extract_image(xref)
+                        if not base_image:
+                            logger.warning(f"Could not extract embedded image for xref {xref} on page {page_num + 1}.")
+                            continue
+                            
+                        image_bytes = base_image["image"] # Raw image bytes
+                        if not image_bytes:
+                            logger.warning(f"Embedded image for xref {xref} has no data (page {page_num + 1}).")
+                            continue
+                        
+                        # Convert to PIL Image for display and getting dimensions
+                        try:
+                            pil_image = Image.open(io.BytesIO(image_bytes))
+                        except Exception as pil_err:
+                            logger.warning(f"Could not open extracted embedded image bytes with PIL for xref {xref} on page {page_num + 1}: {pil_err}")
+                            continue # Skip if PIL can't open it
+                        
+                        # Position data for embedded images
+                        position_data = {
+                            "x": 0, # Placeholder - Fitz extract_image doesn't directly give bounding box of original image on page easily
+                            "y": 0, # Placeholder
+                            "width": pil_image.width,
+                            "height": pil_image.height,
+                            "source": "embedded",
+                            "xref": xref
+                        }
+                        
+                        extracted_data.append((pil_image, image_bytes, position_data, page_num))
+                        logger.info(f"Successfully extracted embedded image xref {xref} from page {page_num + 1} ({pil_image.width}x{pil_image.height}).")
+                        
+                    except Exception as extract_err:
+                        logger.error(f"Error extracting/processing embedded image xref {xref} on page {page_num + 1}: {extract_err}", exc_info=False)
+                        continue
+            else:
+                logger.info(f"No embedded images found on page {page_num + 1}.")
+
+            # 2. New logic: Create full-page rendering
+            try:
+                logger.info(f"Rendering full page {page_num + 1} at {dpi} DPI...")
+                pix = page.get_pixmap(dpi=dpi, alpha=False)
+                page_image_bytes = pix.tobytes("png") # Get bytes in PNG format
+
+                if not page_image_bytes:
+                    logger.warning(f"Full page rendering for page {page_num + 1} resulted in no data.")
                     continue
+
+                page_pil_image = Image.open(io.BytesIO(page_image_bytes))
+                
+                position_data_page = {
+                    "x": 0,
+                    "y": 0,
+                    "width": page_pil_image.width, # or pix.width
+                    "height": page_pil_image.height, # or pix.height
+                    "source": "full_page_render",
+                    "xref": 0 # Not applicable for full page render
+                }
+                
+                extracted_data.append((page_pil_image, page_image_bytes, position_data_page, page_num))
+                logger.info(f"Successfully rendered full page {page_num + 1} ({page_pil_image.width}x{page_pil_image.height}).")
+
+            except Exception as page_render_err:
+                logger.error(f"Error rendering full page {page_num + 1}: {page_render_err}", exc_info=True)
+                # Continue to next page even if full page render fails
 
         pdf_document.close()
-        logger.info(f"Direct extraction finished. Found {len(extracted_data)} images.")
+        logger.info(f"Image extraction (embedded + full page) finished. Found {len(extracted_data)} images in total.")
         return extracted_data
         
     except Exception as e:
@@ -574,7 +602,7 @@ Analysis:"""
                 
                 genai.configure(api_key=google_api_key)
                 # Use a model that supports images, like gemini-1.5-flash-latest or gemini-pro-vision
-                gemini_model_name = 'gemini-1.5-flash-latest' 
+                gemini_model_name = 'gemini-2.5-flash-preview-05-20' 
                 model = genai.GenerativeModel(gemini_model_name)
                 model_used_info = f"Google Gemini API ({gemini_model_name})"
                 
